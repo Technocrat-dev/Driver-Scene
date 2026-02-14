@@ -1,0 +1,20 @@
+# Data
+data/raw/
+data/sampled/
+outputs/
+
+# Environment
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store

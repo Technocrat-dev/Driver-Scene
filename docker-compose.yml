@@ -1,0 +1,17 @@
+version: "3.8"
+
+services:
+  pipeline:
+    build: .
+    container_name: driving-scene-generator
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+    volumes:
+      - ./data:/app/data
+      - ./outputs:/app/outputs
+      - ./.env:/app/.env:ro
+    # Override command as needed:
+    # docker-compose run pipeline generate --prompt v1_baseline --limit 5
+    # docker-compose run pipeline compare --limit 10
+    # docker-compose run pipeline list-prompts
