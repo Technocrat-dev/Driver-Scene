@@ -8,9 +8,7 @@ from pathlib import Path
 
 from src.models import (
     DetectedObject,
-    EvaluationResult,
     GroundTruth,
-    PromptComparisonRow,
     SceneDescription,
 )
 
@@ -259,3 +257,115 @@ class TestPromptRegistry:
         prompts = list_prompts()
         assert len(prompts) == 8
         assert all("id" in p and "strategy" in p for p in prompts)
+
+
+# ── AI Agent Tests ────────────────────────────────────────────────────────────
+
+
+class TestErrorAnalyzerAgent:
+    """Test the AI agent error analysis module."""
+
+    def _make_eval(
+        self, image="img.jpg", prompt="v1", bert_f1=0.5,
+        hall_rate=0.1, comp=0.8, fps=None, fns=None,
+        weather_match=True, lighting_match=True,
+    ):
+        return {
+            "image_name": image,
+            "prompt_id": prompt,
+            "bert_score_f1": bert_f1,
+            "hallucination_rate": hall_rate,
+            "completeness_score": comp,
+            "false_positive_objects": fps or [],
+            "false_negative_objects": fns or [],
+            "weather_match": weather_match,
+            "lighting_match": lighting_match,
+        }
+
+    def test_no_errors(self):
+        from src.agent.analyzer import ErrorAnalyzerAgent
+        import tempfile
+
+        evals = [self._make_eval(image=f"img_{i}.jpg") for i in range(5)]
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(evals, f)
+            f.flush()
+            agent = ErrorAnalyzerAgent()
+            report = agent.analyze(Path(f.name))
+
+        assert report.n_images == 5
+        assert len(report.error_patterns) == 0
+
+    def test_hallucination_bias_detected(self):
+        from src.agent.analyzer import ErrorAnalyzerAgent
+        import tempfile
+
+        # 4 out of 5 images hallucinate 'bus'
+        evals = [
+            self._make_eval(image=f"img_{i}.jpg", fps=["bus"] if i < 4 else [])
+            for i in range(5)
+        ]
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(evals, f)
+            f.flush()
+            agent = ErrorAnalyzerAgent()
+            report = agent.analyze(Path(f.name))
+
+        hall_patterns = [p for p in report.error_patterns if p.pattern_type == "hallucination_bias"]
+        assert len(hall_patterns) >= 1
+        assert hall_patterns[0].severity == "high"
+
+    def test_weather_confusion_detected(self):
+        from src.agent.analyzer import ErrorAnalyzerAgent
+        import tempfile
+
+        # 3 out of 5 images have wrong weather
+        evals = [
+            self._make_eval(image=f"img_{i}.jpg", weather_match=(i >= 3))
+            for i in range(5)
+        ]
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(evals, f)
+            f.flush()
+            agent = ErrorAnalyzerAgent()
+            report = agent.analyze(Path(f.name))
+
+        weather_patterns = [p for p in report.error_patterns if p.pattern_type == "weather_confusion"]
+        assert len(weather_patterns) >= 1
+
+    def test_improvement_suggestions_generated(self):
+        from src.agent.analyzer import ErrorAnalyzerAgent
+        import tempfile
+
+        evals = [
+            self._make_eval(image=f"img_{i}.jpg", fps=["bus"], hall_rate=0.5)
+            for i in range(5)
+        ]
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(evals, f)
+            f.flush()
+            agent = ErrorAnalyzerAgent()
+            report = agent.analyze(Path(f.name))
+
+        assert len(report.improvement_suggestions) > 0
+
+    def test_auto_improve_prompt(self):
+        from src.agent.analyzer import ErrorAnalyzerAgent, AnalysisReport, ErrorPattern
+
+        agent = ErrorAnalyzerAgent()
+        report = AnalysisReport(
+            prompt_id="v1_baseline",
+            n_images=10,
+            error_patterns=[
+                ErrorPattern(
+                    pattern_type="hallucination_bias",
+                    severity="high",
+                    description="Hallucinates buses",
+                    suggestion="Do not report buses unless clearly visible.",
+                )
+            ],
+        )
+        original = "Describe this driving scene."
+        improved = agent.generate_improved_prompt(original, report)
+        assert "CORRECTIONS" in improved
+        assert "buses" in improved

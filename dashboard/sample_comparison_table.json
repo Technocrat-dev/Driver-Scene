@@ -1,0 +1,90 @@
+[
+    {
+        "prompt_id": "v1_baseline",
+        "prompt_strategy": "Zero-shot basic",
+        "n_images": 10,
+        "avg_bert_f1": 0.2131,
+        "avg_hallucination_rate": 0.0450,
+        "avg_completeness": 0.9200,
+        "weather_accuracy": 0.7000,
+        "lighting_accuracy": 0.8000,
+        "avg_judge_score": null
+    },
+    {
+        "prompt_id": "v2_structured",
+        "prompt_strategy": "Zero-shot + detailed schema",
+        "n_images": 10,
+        "avg_bert_f1": 0.2580,
+        "avg_hallucination_rate": 0.0320,
+        "avg_completeness": 0.9800,
+        "weather_accuracy": 0.8000,
+        "lighting_accuracy": 0.9000,
+        "avg_judge_score": null
+    },
+    {
+        "prompt_id": "v3_role",
+        "prompt_strategy": "Role-play AD engineer",
+        "n_images": 10,
+        "avg_bert_f1": 0.2710,
+        "avg_hallucination_rate": 0.0280,
+        "avg_completeness": 0.9600,
+        "weather_accuracy": 0.8000,
+        "lighting_accuracy": 0.8000,
+        "avg_judge_score": null
+    },
+    {
+        "prompt_id": "v4_cot",
+        "prompt_strategy": "Chain-of-thought",
+        "n_images": 10,
+        "avg_bert_f1": 0.3050,
+        "avg_hallucination_rate": 0.0180,
+        "avg_completeness": 1.0000,
+        "weather_accuracy": 0.9000,
+        "lighting_accuracy": 0.9000,
+        "avg_judge_score": null
+    },
+    {
+        "prompt_id": "v5_few_shot",
+        "prompt_strategy": "Few-shot examples",
+        "n_images": 10,
+        "avg_bert_f1": 0.2940,
+        "avg_hallucination_rate": 0.0220,
+        "avg_completeness": 0.9800,
+        "weather_accuracy": 0.9000,
+        "lighting_accuracy": 0.9000,
+        "avg_judge_score": null
+    },
+    {
+        "prompt_id": "v6_safety",
+        "prompt_strategy": "Safety-focused",
+        "n_images": 10,
+        "avg_bert_f1": 0.2450,
+        "avg_hallucination_rate": 0.0150,
+        "avg_completeness": 0.9400,
+        "weather_accuracy": 0.7000,
+        "lighting_accuracy": 0.8000,
+        "avg_judge_score": null
+    },
+    {
+        "prompt_id": "v7_grounded",
+        "prompt_strategy": "Grounded observation",
+        "n_images": 10,
+        "avg_bert_f1": 0.2680,
+        "avg_hallucination_rate": 0.0100,
+        "avg_completeness": 0.9200,
+        "weather_accuracy": 0.8000,
+        "lighting_accuracy": 0.9000,
+        "avg_judge_score": null
+    },
+    {
+        "prompt_id": "v8_combined",
+        "prompt_strategy": "Best combination",
+        "n_images": 10,
+        "avg_bert_f1": 0.3200,
+        "avg_hallucination_rate": 0.0120,
+        "avg_completeness": 1.0000,
+        "weather_accuracy": 0.9000,
+        "lighting_accuracy": 1.0000,
+        "avg_judge_score": null
+    }
+]

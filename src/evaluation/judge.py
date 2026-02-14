@@ -13,7 +13,6 @@ import json
 import logging
 from typing import Any
 
-from src.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -111,5 +110,5 @@ def evaluate_with_judge(
         "safety_relevance": 0,
         "actionability": 0,
         "overall": 0,
-        "reasoning": f"Evaluation failed",
+        "reasoning": "Evaluation failed",
     }

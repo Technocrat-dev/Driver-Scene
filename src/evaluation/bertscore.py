@@ -7,7 +7,6 @@ descriptions built from BDD100K annotations.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +21,6 @@ def _get_scorer():
         logger.info("Loading BERTScore model (first call only)...")
         from bert_score import BERTScorer
         _scorer = BERTScorer(
-            model_type="microsoft/deberta-xlarge-mnli",
             lang="en",
             rescale_with_baseline=True,
         )

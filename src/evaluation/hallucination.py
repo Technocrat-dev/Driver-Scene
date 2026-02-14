@@ -95,16 +95,22 @@ def compute_hallucination(
         HallucinationResult with false positives, negatives, and rates.
     """
     # Normalize predicted objects
-    pred_counts: dict[str, int] = {}
+    pred_counts_raw: dict[str, int] = {}
     for obj in predicted_objects:
         norm_cat = normalize_category(obj.category)
-        pred_counts[norm_cat] = pred_counts.get(norm_cat, 0) + obj.count
+        pred_counts_raw[norm_cat] = pred_counts_raw.get(norm_cat, 0) + obj.count
 
     # Normalize GT objects (should already be normalized, but just in case)
     gt_counts: dict[str, int] = {}
     for cat, count in gt_objects.items():
         norm_cat = normalize_category(cat)
         gt_counts[norm_cat] = gt_counts.get(norm_cat, 0) + count
+
+    # Filter predictions to only BDD100K categories + GT categories
+    # Non-BDD100K predictions (building, tree, etc.) are valid observations
+    # but shouldn't be penalized since BDD100K doesn't annotate them
+    relevant_categories = BDD100K_CATEGORIES | set(gt_counts.keys())
+    pred_counts = {k: v for k, v in pred_counts_raw.items() if k in relevant_categories}
 
     # All categories present in either set
     all_categories = set(pred_counts.keys()) | set(gt_counts.keys())
@@ -122,8 +128,8 @@ def compute_hallucination(
             false_negatives.append(cat)
 
     # Compute rates
-    n_predicted = len([c for c in pred_counts if c in BDD100K_CATEGORIES or c in gt_counts])
-    n_gt = len(gt_counts)
+    _n_predicted = len([c for c in pred_counts if c in BDD100K_CATEGORIES or c in gt_counts])
+    _n_gt = len(gt_counts)
     n_union = len(all_categories)
 
     if n_union == 0:

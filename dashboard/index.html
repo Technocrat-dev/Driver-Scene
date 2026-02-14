@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Driving Scene Generator — Results Dashboard</title>
+    <meta name="description" content="Interactive dashboard for VLM prompt comparison and evaluation metrics visualization">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-content">
+            <div class="logo-group">
+                <div class="logo-icon">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M12 6v6l4 2"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1>Driving Scene Generator</h1>
+                    <p class="subtitle">VLM Prompt Optimization Dashboard</p>
+                </div>
+            </div>
+            <div class="header-actions">
+                <div class="status-badge" id="statusBadge">
+                    <span class="status-dot"></span>
+                    <span id="statusText">Loading...</span>
+                </div>
+                <label class="file-upload" for="fileInput">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                        <polyline points="17 8 12 3 7 8"/>
+                        <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    Load Results
+                </label>
+                <input type="file" id="fileInput" accept=".json" multiple hidden>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main">
+        <!-- Summary Cards -->
+        <section class="summary-cards" id="summaryCards">
+            <div class="card metric-card">
+                <div class="metric-label">Prompts Tested</div>
+                <div class="metric-value" id="metricPrompts">—</div>
+                <div class="metric-sub">of 8 variants</div>
+            </div>
+            <div class="card metric-card">
+                <div class="metric-label">Images Processed</div>
+                <div class="metric-value" id="metricImages">—</div>
+                <div class="metric-sub">per variant</div>
+            </div>
+            <div class="card metric-card accent">
+                <div class="metric-label">Best Prompt</div>
+                <div class="metric-value" id="metricBestPrompt">—</div>
+                <div class="metric-sub" id="metricBestScore">—</div>
+            </div>
+            <div class="card metric-card">
+                <div class="metric-label">Avg Hallucination</div>
+                <div class="metric-value" id="metricHallucination">—</div>
+                <div class="metric-sub">across all variants</div>
+            </div>
+        </section>
+
+        <!-- Charts Row -->
+        <section class="charts-row">
+            <div class="card chart-card">
+                <h2>Prompt Comparison — Key Metrics</h2>
+                <p class="chart-desc">BERTScore F1, completeness, and inverted hallucination rate per prompt variant</p>
+                <div class="chart-container">
+                    <canvas id="barChart"></canvas>
+                </div>
+            </div>
+            <div class="card chart-card">
+                <h2>Metric Tradeoffs — Radar</h2>
+                <p class="chart-desc">Multi-dimensional view of the top 3 prompts</p>
+                <div class="chart-container radar-container">
+                    <canvas id="radarChart"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <!-- Accuracy Row -->
+        <section class="charts-row">
+            <div class="card chart-card">
+                <h2>Weather & Lighting Accuracy</h2>
+                <p class="chart-desc">Scene attribute classification correctness per prompt</p>
+                <div class="chart-container">
+                    <canvas id="accuracyChart"></canvas>
+                </div>
+            </div>
+            <div class="card chart-card">
+                <h2>Hallucination Rate Distribution</h2>
+                <p class="chart-desc">Lower is better — measures false object detections</p>
+                <div class="chart-container">
+                    <canvas id="hallucinationChart"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <!-- Comparison Table -->
+        <section class="card table-card">
+            <h2>Full Comparison Table</h2>
+            <p class="chart-desc">All metrics for every prompt variant tested</p>
+            <div class="table-wrapper">
+                <table id="comparisonTable">
+                    <thead>
+                        <tr>
+                            <th>Prompt ID</th>
+                            <th>Strategy</th>
+                            <th>Images</th>
+                            <th>BERTScore F1</th>
+                            <th>Hallucination</th>
+                            <th>Completeness</th>
+                            <th>Weather Acc</th>
+                            <th>Lighting Acc</th>
+                            <th>Judge Score</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody">
+                        <tr><td colspan="9" class="empty-state">Load comparison_table.json to view results</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Agent Analysis -->
+        <section class="card" id="agentSection" style="display:none;">
+            <h2>AI Agent Analysis</h2>
+            <p class="chart-desc">Error pattern detection and prompt improvement suggestions</p>
+            <div id="agentContent"></div>
+        </section>
+
+        <!-- Image Viewer -->
+        <section class="card" id="imageViewer" style="display:none;">
+            <h2>Image Detail Viewer</h2>
+            <p class="chart-desc">Click a row in the table above to view VLM output details</p>
+            <div id="imageViewerContent"></div>
+        </section>
+
+        <!-- Empty State -->
+        <section class="card empty-card" id="emptyState">
+            <div class="empty-icon">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="16" y1="13" x2="8" y2="13"/>
+                    <line x1="16" y1="17" x2="8" y2="17"/>
+                    <polyline points="10 9 9 9 8 9"/>
+                </svg>
+            </div>
+            <h3>No Results Loaded</h3>
+            <p>Run the pipeline comparison and load the output files:</p>
+            <div class="code-block">
+                <code>python -m src.pipeline compare --limit 10</code>
+            </div>
+            <p>Then click <strong>"Load Results"</strong> and select <code>comparison_table.json</code> from the outputs folder.</p>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <p>Driving Scene Description Generator &mdash; Built for AD/ADAS Research</p>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>

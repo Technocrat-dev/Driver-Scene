@@ -12,8 +12,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import sys
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -181,8 +179,8 @@ def run_evaluate(
         List of EvaluationResult objects.
     """
     from src.data.ground_truth import load_ground_truths
-    from src.evaluation.bertscore import compute_bertscore
     from src.evaluation.completeness import compute_completeness
+    from src.evaluation.count_accuracy import compute_count_accuracy
     from src.evaluation.hallucination import compute_hallucination
 
     if run_dir is None:
@@ -241,6 +239,9 @@ def run_evaluate(
         # Completeness
         comp = compute_completeness(desc)
 
+        # Count accuracy
+        count_acc = compute_count_accuracy(desc.objects, gt.objects)
+
         # Judge (optional)
         judge_score = None
         judge_reasoning = ""
@@ -255,6 +256,9 @@ def run_evaluate(
             judge_reasoning = judge_result.get("reasoning", "")
 
         # Attribute accuracy
+        weather_match = _check_weather_match(desc.weather, gt.weather)
+        lighting_match = _check_lighting_match(desc.lighting, gt.timeofday)
+
         eval_result = EvaluationResult(
             image_name=image_name,
             prompt_id=prompt_id,
@@ -265,6 +269,10 @@ def run_evaluate(
             false_positive_objects=hall.false_positives,
             false_negative_objects=hall.false_negatives,
             completeness_score=comp["total"],
+            count_accuracy_mae=count_acc.mae,
+            count_accuracy_ratio=count_acc.count_ratio,
+            weather_match=weather_match,
+            lighting_match=lighting_match,
             judge_score=judge_score,
             judge_reasoning=judge_reasoning,
         )
@@ -280,12 +288,16 @@ def run_evaluate(
         avg_bert = sum(e.bert_score_f1 for e in evaluations) / len(evaluations)
         avg_hall = sum(e.hallucination_rate for e in evaluations) / len(evaluations)
         avg_comp = sum(e.completeness_score for e in evaluations) / len(evaluations)
+        avg_mae = sum(e.count_accuracy_mae for e in evaluations) / len(evaluations)
+        avg_ratio = sum(e.count_accuracy_ratio for e in evaluations) / len(evaluations)
         print(f"\n{'='*60}")
         print(f"Evaluation Summary ({len(evaluations)} images)")
         print(f"{'='*60}")
         print(f"  Avg BERTScore F1:       {avg_bert:.4f}")
         print(f"  Avg Hallucination Rate:  {avg_hall:.4f}")
         print(f"  Avg Completeness:        {avg_comp:.4f}")
+        print(f"  Avg Count MAE:           {avg_mae:.4f}")
+        print(f"  Avg Count Ratio:         {avg_ratio:.4f}")
         if use_judge:
             avg_judge = sum(e.judge_score for e in evaluations if e.judge_score) / max(
                 len([e for e in evaluations if e.judge_score]), 1
@@ -295,6 +307,45 @@ def run_evaluate(
 
     logger.info(f"Evaluation results saved to {eval_file}")
     return evaluations
+
+
+def _check_weather_match(predicted: str, gt_weather: str) -> bool:
+    """Check if predicted weather matches ground truth."""
+    pred = predicted.lower().strip()
+    gt = gt_weather.lower().strip()
+    if gt in ("undefined", "unknown", ""):
+        return True  # No GT to compare against
+    # Normalize common variants
+    weather_groups = {
+        "clear": {"clear"},
+        "rainy": {"rainy", "rain"},
+        "snowy": {"snowy", "snow"},
+        "foggy": {"foggy", "fog"},
+        "overcast": {"overcast", "cloudy"},
+        "partly cloudy": {"partly cloudy", "partly_cloudy"},
+    }
+    for canonical, variants in weather_groups.items():
+        if gt in variants or gt == canonical:
+            return pred in variants or pred == canonical
+    return pred == gt
+
+
+def _check_lighting_match(predicted: str, gt_timeofday: str) -> bool:
+    """Check if predicted lighting matches ground truth timeofday."""
+    pred = predicted.lower().strip()
+    gt = gt_timeofday.lower().strip()
+    if gt in ("undefined", "unknown", ""):
+        return True
+    # Map BDD100K timeofday → VLM lighting vocabulary
+    lighting_map = {
+        "daytime": {"daytime", "day"},
+        "night": {"night", "nighttime"},
+        "dawn/dusk": {"dawn", "dusk", "dawn/dusk", "twilight"},
+    }
+    for gt_val, pred_variants in lighting_map.items():
+        if gt == gt_val:
+            return pred in pred_variants
+    return pred == gt
 
 
 # ── Compare Mode ──────────────────────────────────────────────────────────────
@@ -365,6 +416,15 @@ def run_compare(
                         if use_judge
                         else None
                     ),
+                    avg_count_mae=round(
+                        sum(e.count_accuracy_mae for e in evaluations) / len(evaluations), 4
+                    ),
+                    weather_accuracy=round(
+                        sum(1 for e in evaluations if e.weather_match) / len(evaluations), 4
+                    ),
+                    lighting_accuracy=round(
+                        sum(1 for e in evaluations if e.lighting_match) / len(evaluations), 4
+                    ),
                 )
                 comparison_rows.append(row)
 
@@ -412,6 +472,56 @@ def _save_comparison_table(rows: list[PromptComparisonRow], run_dir: Path) -> No
         json.dump(data, f, indent=2)
 
     logger.info(f"Comparison table saved to {run_dir}")
+
+
+# ── Export Training Data ──────────────────────────────────────────────────────
+
+
+def _export_training_data(
+    results_file: Path,
+    output_path: Path | None = None,
+    prompt_id: str | None = None,
+) -> None:
+    """
+    Convert pipeline results to SFT (Supervised Fine-Tuning) training data.
+
+    Outputs JSONL with one conversation per line in the messages format:
+    {"messages": [{"role": "user", "content": <prompt>}, {"role": "assistant", "content": <description_json>}]}
+    """
+    with open(results_file, "r") as f:
+        results = json.load(f)
+
+    # Get prompt text if provided
+    prompt_text = "Describe this driving scene image."
+    if prompt_id:
+        from src.prompts.templates import get_prompt
+        prompt_text = get_prompt(prompt_id)
+
+    # Filter to successful results only
+    valid = [r for r in results if r.get("description") is not None]
+
+    if output_path is None:
+        output_path = results_file.parent / f"training_data_{results_file.stem}.jsonl"
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        for r in valid:
+            entry = {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": f"[Image: {r['image_name']}]\n{prompt_text}",
+                    },
+                    {
+                        "role": "assistant",
+                        "content": json.dumps(r["description"], ensure_ascii=False),
+                    },
+                ]
+            }
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+    print(f"\nExported {len(valid)} training samples → {output_path}")
+    print("Format: JSONL (messages format for SFT)")
+    print(f"Skipped: {len(results) - len(valid)} failed generations")
 
 
 # ── CLI Entry Point ───────────────────────────────────────────────────────────
@@ -470,6 +580,12 @@ Examples:
     full.add_argument("--limit", type=int, default=None, help="Max images")
     full.add_argument("--judge", action="store_true", help="Include LLM-as-judge")
 
+    # Analyze (AI Agent)
+    analyze = subparsers.add_parser("analyze", help="AI agent: analyze errors and suggest improvements")
+    analyze.add_argument("--results", required=True, type=Path, help="Path to evaluation JSON")
+    analyze.add_argument("--prompt", default=None, help="Original prompt ID (for auto-improvement)")
+    analyze.add_argument("--save", type=Path, default=None, help="Save report to JSON")
+
     # Compare
     comp = subparsers.add_parser("compare", help="Compare all prompt variants")
     comp.add_argument("--limit", type=int, default=None, help="Images per variant")
@@ -478,6 +594,12 @@ Examples:
 
     # List prompts
     subparsers.add_parser("list-prompts", help="List available prompt variants")
+
+    # Export training data
+    export = subparsers.add_parser("export-training", help="Export results as SFT training data")
+    export.add_argument("--results", required=True, type=Path, help="Path to results JSON")
+    export.add_argument("--output", type=Path, default=None, help="Output JSONL file path")
+    export.add_argument("--prompt", default=None, help="Prompt variant ID (for system prompt)")
 
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
 
@@ -507,6 +629,22 @@ Examples:
     elif args.command == "compare":
         run_compare(limit=args.limit, prompt_ids=args.prompts, use_judge=args.judge)
 
+    elif args.command == "analyze":
+        from src.agent.analyzer import ErrorAnalyzerAgent
+        agent = ErrorAnalyzerAgent()
+        report = agent.analyze(args.results)
+        agent.print_report(report)
+        if args.save:
+            agent.save_report(report, args.save)
+        if args.prompt:
+            from src.prompts.templates import get_prompt
+            original = get_prompt(args.prompt)
+            improved = agent.generate_improved_prompt(original, report)
+            print("\n[AUTO-IMPROVED] Prompt:")
+            print("-" * 60)
+            print(improved)
+            print("-" * 60)
+
     elif args.command == "list-prompts":
         from src.prompts.templates import list_prompts
         prompts = list_prompts()
@@ -515,6 +653,9 @@ Examples:
         for p in prompts:
             print(f"{p['id']:<20} {p['strategy']:<30} {p['description']}")
         print()
+
+    elif args.command == "export-training":
+        _export_training_data(args.results, args.output, args.prompt)
 
     else:
         parser.print_help()

@@ -46,8 +46,8 @@ graph LR
 
 ```bash
 # Clone the repo
-git clone https://github.com/yourusername/driving-scene-generator.git
-cd driving-scene-generator
+git clone https://github.com/Technocrat-dev/Driver-Scene.git
+cd Driver-Scene
 
 # Install dependencies
 pip install -e ".[dev]"
@@ -87,6 +87,12 @@ python -m src.pipeline full --prompt v4_cot --limit 20
 
 # 5. Compare all 8 prompt variants (the main experiment!)
 python -m src.pipeline compare --limit 10
+
+# 6. AI Agent: analyze errors and suggest prompt improvements
+python -m src.pipeline analyze --results outputs/<run_id>/evaluation_results_v1_baseline.json --prompt v1_baseline
+
+# 7. Export results as fine-tuning training data
+python -m src.pipeline export-training --results outputs/<run_id>/results_v4_cot.json --prompt v4_cot
 ```
 
 ### Docker
@@ -117,9 +123,12 @@ docker-compose run pipeline generate --prompt v1_baseline --limit 5
 
 | Metric | What it Measures | Method |
 |--------|-----------------|--------|
-| **BERTScore F1** | Semantic similarity to GT descriptions | DeBERTa-xlarge-MNLI |
+| **BERTScore F1** | Semantic similarity to GT descriptions | RoBERTa-large (standard default) |
 | **Hallucination Rate** | False positive/negative object categories | Set comparison vs BDD100K labels |
 | **Completeness** | Coverage of required output fields | Weighted field validation |
+| **Weather Accuracy** | Weather classification correctness | Direct match vs BDD100K labels |
+| **Lighting Accuracy** | Time-of-day classification correctness | Match with vocabulary normalization |
+| **Count Accuracy (MAE)** | Object counting precision per category | Mean Absolute Error vs BDD100K counts |
 | **LLM-as-Judge** | Overall quality rating (1-5) | Gemini self-evaluation |
 
 ## Example Output
@@ -162,22 +171,47 @@ docker-compose run pipeline generate --prompt v1_baseline --limit 5
 │   ├── prompts/
 │   │   ├── templates.py    # 8 prompt variants
 │   │   └── registry.py     # Prompt management
-│   └── evaluation/
-│       ├── bertscore.py    # Semantic similarity
-│       ├── hallucination.py # Object hallucination
-│       ├── completeness.py # Field coverage
-│       └── judge.py        # LLM-as-judge
+│   ├── evaluation/
+│   │   ├── bertscore.py    # Semantic similarity
+│   │   ├── hallucination.py # Object hallucination
+│   │   ├── completeness.py # Field coverage
+│   │   └── judge.py        # LLM-as-judge
+│   └── agent/
+│       └── analyzer.py     # AI agent: error analysis & prompt improvement
 ├── tests/
-│   └── test_pipeline.py    # Unit tests
+│   └── test_pipeline.py    # 22 unit tests
+├── dashboard/
+│   ├── index.html          # Results visualization
+│   ├── styles.css          # Dashboard styling
+│   └── app.js              # Chart rendering + data loading
 ├── data/                   # Dataset (gitignored)
 └── outputs/                # Results (gitignored)
+```
+
+## AI Agent (MLOps Support)
+
+The `analyze` command runs an AI agent that:
+1. **Detects error patterns** — hallucination biases, weather/lighting confusion, completeness gaps
+2. **Generates analysis reports** — strengths, weaknesses, and severity-ranked patterns
+3. **Suggests prompt improvements** — actionable text additions to address found issues
+4. **Auto-improves prompts** — appends correction instructions based on error analysis
+
+```bash
+# Analyze evaluation results
+python -m src.pipeline analyze --results outputs/<run>/evaluation_results_v1_baseline.json
+
+# Analyze + auto-generate improved prompt
+python -m src.pipeline analyze --results outputs/<run>/evaluation_results_v1_baseline.json --prompt v1_baseline
+
+# Save report to JSON
+python -m src.pipeline analyze --results outputs/<run>/evaluation_results_v1_baseline.json --save report.json
 ```
 
 ## Tech Stack
 
 - **Python 3.11** with type hints and Pydantic v2
 - **Gemini 2.5 Flash** (free tier) for VLM inference
-- **BERTScore** with DeBERTa-xlarge-MNLI for semantic evaluation
+- **BERTScore** with RoBERTa-large for semantic evaluation
 - **Docker** for reproducible deployment
 
 ---
@@ -194,6 +228,81 @@ The free Gemini tier allows ~250 requests/day. This pipeline is designed for tha
 | Production run | 200 | 1 (best) | 200 | 1 |
 
 The pipeline supports **checkpoint/resume** — if interrupted, it picks up where it left off.
+
+---
+
+## Results Dashboard
+
+An interactive HTML dashboard for visualizing prompt comparison results:
+
+```bash
+# Open in browser after running the comparison
+start dashboard/index.html    # Windows
+open dashboard/index.html     # macOS
+```
+
+**Features:**
+- Bar charts comparing all 8 prompts across BERTScore, completeness, and hallucination rate
+- Radar chart showing metric tradeoffs for the top 3 prompts
+- Weather and lighting accuracy comparison
+- Color-coded comparison table with best-prompt highlighting
+- AI agent analysis viewer with error pattern details
+
+Load `comparison_table.json` from your outputs folder via the "Load Results" button.
+
+---
+
+## Fine-Tuning Integration
+
+While this project focuses on prompt engineering, the pipeline's structured output is designed to feed directly into VLM fine-tuning workflows:
+
+### Output → Training Data
+
+The pipeline's `results_*.json` files contain image-description pairs in a format convertible to SFT (Supervised Fine-Tuning) data:
+
+```python
+# Convert pipeline output to messages format for fine-tuning
+{"messages": [
+    {"role": "user", "content": [image_bytes, prompt_text]},
+    {"role": "assistant", "content": json.dumps(scene_description)}
+]}
+```
+
+### Recommended Fine-Tuning Approaches
+
+| Method | Parameters | Use Case |
+|--------|-----------|----------|
+| **Full Fine-Tuning** | All weights | Large datasets (10k+ samples), maximum quality |
+| **LoRA** | ~0.1% of weights | Moderate datasets (1-5k), good quality/cost tradeoff |
+| **QLoRA** | ~0.1% (4-bit base) | Limited GPU memory, minimal quality loss |
+| **Prompt Tuning** | Soft prompt only | Very small datasets, preserves base model |
+
+### Pipeline-Assisted Fine-Tuning Workflow
+
+```mermaid
+graph LR
+    A[Generate with best prompt] --> B[Evaluate quality]
+    B --> C[Agent: flag errors]
+    C --> D[Human review flagged items]
+    D --> E[Curated training set]
+    E --> F[LoRA fine-tune VLM]
+    F --> G[Re-evaluate with pipeline]
+```
+
+The AI agent's error analysis identifies systematic failure modes (e.g., hallucinated bus detections), which pinpoint exactly what training data to collect for targeted improvement.
+
+## Future Work
+
+- **Temporal scene description** — Process consecutive BDD100K video frames to generate scene evolution narratives (e.g., "vehicle ahead is braking" → "intersection approaching"). This would better reflect real AD perception pipelines that reason over time.
+- **Multi-model comparison** — Benchmark Gemini vs. GPT-4V vs. open-source VLMs (LLaVA, Qwen-VL) on the same evaluation framework.
+- **Spatial grounding** — Add bounding box prediction evaluation comparing VLM spatial descriptions against BDD100K box annotations.
+
+## References
+
+- **BDD100K Dataset**: Yu, F. et al. "BDD100K: A Diverse Driving Dataset for Heterogeneous Multitask Learning." *CVPR 2020*. [arXiv:1805.04687](https://arxiv.org/abs/1805.04687)
+- **BERTScore**: Zhang, T. et al. "BERTScore: Evaluating Text Generation with BERT." *ICLR 2020*. [arXiv:1904.09675](https://arxiv.org/abs/1904.09675)
+- **LLM-as-Judge**: Zheng, L. et al. "Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena." *NeurIPS 2023*. [arXiv:2306.05685](https://arxiv.org/abs/2306.05685)
+- **Chain-of-Thought Prompting**: Wei, J. et al. "Chain-of-Thought Prompting Elicits Reasoning in Large Language Models." *NeurIPS 2022*. [arXiv:2201.11903](https://arxiv.org/abs/2201.11903)
 
 ## License
 

@@ -75,6 +75,10 @@ class EvaluationResult(BaseModel):
     false_positive_objects: list[str] = Field(default_factory=list)
     false_negative_objects: list[str] = Field(default_factory=list)
     completeness_score: float = 0.0
+    count_accuracy_mae: float = 0.0
+    count_accuracy_ratio: float = 0.0
+    weather_match: bool = False
+    lighting_match: bool = False
     judge_score: float | None = None
     judge_reasoning: str = ""
 
@@ -89,5 +93,6 @@ class PromptComparisonRow(BaseModel):
     avg_hallucination_rate: float
     avg_completeness: float
     avg_judge_score: float | None = None
+    avg_count_mae: float = 0.0
     weather_accuracy: float = 0.0
     lighting_accuracy: float = 0.0

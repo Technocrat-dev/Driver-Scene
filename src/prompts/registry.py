@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from src.prompts.templates import PROMPT_TEMPLATES, get_prompt, get_prompt_info
+from src.prompts.templates import PROMPT_TEMPLATES
 
 
 @dataclass

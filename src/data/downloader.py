@@ -106,7 +106,7 @@ def stratified_sample(
     elif len(sampled) < n:
         # Add more from remaining
         used_names = {s["name"] for s in sampled}
-        remaining = [l for l in available if l["name"] not in used_names]
+        remaining = [label for label in available if label["name"] not in used_names]
         rng.shuffle(remaining)
         sampled.extend(remaining[: n - len(sampled)])
 
