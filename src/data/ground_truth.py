@@ -75,6 +75,7 @@ def parse_single_label(label_entry: dict) -> GroundTruth:
         weather=weather,
         scene=scene,
         timeofday=timeofday,
+        labels_list=labels_list,
     )
 
     return GroundTruth(
@@ -84,6 +85,7 @@ def parse_single_label(label_entry: dict) -> GroundTruth:
         scene=scene,
         timeofday=timeofday,
         description=description,
+        raw_labels=labels_list,
     )
 
 
@@ -92,36 +94,82 @@ def _build_gt_description(
     weather: str,
     scene: str,
     timeofday: str,
+    labels_list: list[dict] | None = None,
 ) -> str:
     """
-    Build a natural language description from ground truth labels.
+    Build a rich natural language description from ground truth labels.
 
     This serves as the reference text for BERTScore evaluation.
+    Enhanced with spatial context derived from bounding box positions.
     """
     parts = []
 
-    # Scene overview
+    # Scene overview — more natural phrasing
     time_str = timeofday if timeofday != "undefined" else "unspecified time"
     weather_str = weather if weather != "undefined" else "unspecified weather"
     scene_str = scene if scene != "undefined" else "a road"
-    parts.append(
-        f"A driving scene on {scene_str} during {time_str} with {weather_str} conditions."
-    )
 
-    # Objects
+    # Vary sentence structure for richer descriptions
+    if weather_str == "clear":
+        parts.append(f"A {time_str} driving scene on a {scene_str} under clear skies.")
+    elif weather_str in ("rainy", "rain"):
+        parts.append(f"A {time_str} driving scene on a {scene_str} with rainy conditions and wet road surfaces.")
+    elif weather_str in ("foggy", "fog"):
+        parts.append(f"A {time_str} driving scene on a {scene_str} with foggy conditions reducing visibility.")
+    elif weather_str in ("snowy", "snow"):
+        parts.append(f"A {time_str} driving scene on a {scene_str} with snowy conditions.")
+    else:
+        parts.append(f"A {time_str} driving scene on a {scene_str} with {weather_str} conditions.")
+
+    # Objects with spatial context from bounding boxes
     if objects:
         obj_parts = []
         for cat, count in sorted(objects.items(), key=lambda x: -x[1]):
             name = CATEGORY_NAMES.get(cat, cat)
+            spatial_hint = _get_spatial_hint(cat, labels_list) if labels_list else ""
             if count == 1:
-                obj_parts.append(f"1 {name}")
+                obj_parts.append(f"1 {name}{spatial_hint}")
             else:
-                obj_parts.append(f"{count} {name}s")
+                obj_parts.append(f"{count} {name}s{spatial_hint}")
         parts.append(f"The scene contains {', '.join(obj_parts)}.")
+
+        # Add driving relevance
+        total_objects = sum(objects.values())
+        if total_objects > 10:
+            parts.append("The road is busy with significant traffic.")
+        elif total_objects > 5:
+            parts.append("Moderate traffic is observed.")
+        else:
+            parts.append("Light traffic conditions.")
+
+        # Add safety-relevant details
+        if objects.get("person", 0) > 0 or objects.get("rider", 0) > 0:
+            parts.append("Vulnerable road users are present, requiring caution.")
     else:
         parts.append("No annotated objects are present in the scene.")
 
     return " ".join(parts)
+
+
+def _get_spatial_hint(category: str, labels_list: list[dict]) -> str:
+    """Extract a spatial hint from bounding boxes for a given category."""
+    boxes = [
+        label["box2d"]
+        for label in labels_list
+        if label.get("category") == category and label.get("box2d")
+    ]
+    if not boxes:
+        return ""
+
+    # Compute average horizontal position (0=left, 1=right) for the category
+    avg_cx = sum((b["x1"] + b["x2"]) / 2 for b in boxes) / len(boxes) / 1280
+
+    if avg_cx < 0.35:
+        return " on the left side"
+    elif avg_cx > 0.65:
+        return " on the right side"
+    else:
+        return " ahead"
 
 
 def load_ground_truths(labels_path: Path | None = None) -> dict[str, GroundTruth]:

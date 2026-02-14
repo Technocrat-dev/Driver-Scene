@@ -12,7 +12,7 @@ Built for autonomous driving perception research — processes dashcam images th
 graph LR
     A[BDD100K Images] --> B[Stratified Sampler]
     B --> C[Image Subset]
-    C --> D[VLM Engine<br/>Gemini 2.5 Flash]
+    C --> D[VLM Engine<br/>Gemini / Groq]
     E[Prompt Registry<br/>8 Variants] --> D
     D --> F[Structured JSON<br/>Scene Descriptions]
     F --> G[Evaluation Framework]
@@ -28,8 +28,12 @@ graph LR
 
 - **8 systematically designed prompt variants** — from zero-shot baseline to optimized CoT+grounding combinations
 - **Structured JSON outputs** — scene summaries, object detection, weather/lighting classification, hazard identification, and meta-actions (brake, accelerate, lane change, yield)
-- **4-metric evaluation framework** — BERTScore semantic similarity, hallucination rate detection, completeness scoring, LLM-as-judge
-- **Smart rate limiting** — designed for Gemini free tier (10 RPM / 250 RPD) with checkpoint/resume for long runs
+- **7-metric evaluation framework** — BERTScore semantic similarity, hallucination rate, completeness scoring, count accuracy, spatial grounding, weather/lighting accuracy, and LLM-as-judge
+- **Spatial grounding evaluation** — 3×3 zone grid (left/center/right × near/mid/far) comparing VLM spatial descriptions against BDD100K bounding boxes
+- **Temporal scene description** — video frame sequence processing with scene evolution tracking
+- **Dual VLM backend** — supports **Gemini** (Google) and **Groq** (Llama 3.2 Vision) with one config switch
+- **Smart rate limiting** — designed for free tiers: Gemini (15 RPM / 1,000 RPD) or Groq (14,400 RPD) with checkpoint/resume for long runs
+- **AI error analysis agent** — detects systematic error patterns and auto-generates improved prompts
 - **Reproducible Docker pipeline** — one command to build and run
 
 ---
@@ -39,7 +43,9 @@ graph LR
 ### Prerequisites
 
 1. **Python 3.11+**
-2. **Gemini API Key** (free): Get one at [Google AI Studio](https://aistudio.google.com/apikey)
+2. **VLM API Key** (free, pick one):
+   - **Groq** (recommended, 14,400 RPD): Get at [console.groq.com/keys](https://console.groq.com/keys)
+   - **Gemini**: Get at [Google AI Studio](https://aistudio.google.com/apikey)
 3. **BDD100K Dataset**: Register (free) at [bdd-data.berkeley.edu](https://bdd-data.berkeley.edu)
 
 ### Setup
@@ -93,6 +99,9 @@ python -m src.pipeline analyze --results outputs/<run_id>/evaluation_results_v1_
 
 # 7. Export results as fine-tuning training data
 python -m src.pipeline export-training --results outputs/<run_id>/results_v4_cot.json --prompt v4_cot
+
+# 8. Process video frame sequences for temporal scene evolution
+python -m src.pipeline temporal --prompt v8_combined --limit 3
 ```
 
 ### Docker
@@ -129,6 +138,7 @@ docker-compose run pipeline generate --prompt v1_baseline --limit 5
 | **Weather Accuracy** | Weather classification correctness | Direct match vs BDD100K labels |
 | **Lighting Accuracy** | Time-of-day classification correctness | Match with vocabulary normalization |
 | **Count Accuracy (MAE)** | Object counting precision per category | Mean Absolute Error vs BDD100K counts |
+| **Spatial Grounding** | Object position accuracy in 3×3 zone grid | IoU of predicted vs GT zone distributions |
 | **LLM-as-Judge** | Overall quality rating (1-5) | Gemini self-evaluation |
 
 ## Example Output
@@ -165,7 +175,8 @@ docker-compose run pipeline generate --prompt v1_baseline --limit 5
 │   ├── pipeline.py         # CLI orchestrator
 │   ├── data/
 │   │   ├── downloader.py   # BDD100K sampler
-│   │   └── ground_truth.py # GT label parser
+│   │   ├── ground_truth.py # GT label parser (enriched descriptions)
+│   │   └── temporal.py     # Video frame sequence processing
 │   ├── vlm/
 │   │   └── client.py       # Gemini API client
 │   ├── prompts/
@@ -175,11 +186,13 @@ docker-compose run pipeline generate --prompt v1_baseline --limit 5
 │   │   ├── bertscore.py    # Semantic similarity
 │   │   ├── hallucination.py # Object hallucination
 │   │   ├── completeness.py # Field coverage
+│   │   ├── count_accuracy.py # Object count MAE & ratio
+│   │   ├── spatial.py      # 3×3 zone spatial grounding
 │   │   └── judge.py        # LLM-as-judge
 │   └── agent/
 │       └── analyzer.py     # AI agent: error analysis & prompt improvement
 ├── tests/
-│   └── test_pipeline.py    # 22 unit tests
+│   └── test_pipeline.py    # 44 unit tests
 ├── dashboard/
 │   ├── index.html          # Results visualization
 │   ├── styles.css          # Dashboard styling
@@ -210,7 +223,7 @@ python -m src.pipeline analyze --results outputs/<run>/evaluation_results_v1_bas
 ## Tech Stack
 
 - **Python 3.11** with type hints and Pydantic v2
-- **Gemini 2.5 Flash** (free tier) for VLM inference
+- **Gemini 2.5 Flash-Lite** (free tier, 1,000 RPD) for VLM inference
 - **BERTScore** with RoBERTa-large for semantic evaluation
 - **Docker** for reproducible deployment
 
@@ -218,14 +231,14 @@ python -m src.pipeline analyze --results outputs/<run>/evaluation_results_v1_bas
 
 ## Rate Limit Strategy
 
-The free Gemini tier allows ~250 requests/day. This pipeline is designed for that constraint:
+The free Gemini tier (Flash-Lite) allows ~1,000 requests/day. This pipeline is designed for that constraint:
 
 | Experiment | Images | Prompts | API Calls | Days |
 |-----------|--------|---------|-----------|------|
 | Quick test | 5 | 1 | 5 | <1 |
 | Single prompt eval | 50 | 1 | 50 | <1 |
-| Full comparison | 50 | 8 | 400 | 2 |
-| Production run | 200 | 1 (best) | 200 | 1 |
+| Full comparison | 50 | 8 | 400 | <1 |
+| Production run | 200 | 1 (best) | 200 | <1 |
 
 The pipeline supports **checkpoint/resume** — if interrupted, it picks up where it left off.
 

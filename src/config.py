@@ -8,13 +8,20 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """Global configuration loaded from .env file."""
 
-    # API
+    # VLM Provider: "gemini" or "groq"
+    vlm_provider: str = "gemini"
+
+    # Gemini API
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-2.5-flash-lite"
+
+    # Groq API (free tier: 14,400 RPD, 30 RPM)
+    groq_api_key: str = ""
+    groq_model: str = "meta-llama/llama-4-scout-17b-16e-instruct"
 
     # Rate limiting (free tier)
-    rate_limit_rpm: int = 10
-    rate_limit_rpd: int = 250
+    rate_limit_rpm: int = 15
+    rate_limit_rpd: int = 1000
 
     # Paths
     data_dir: Path = Path("data")
@@ -26,8 +33,9 @@ class Settings(BaseSettings):
     random_seed: int = 42
 
     # Processing
-    max_retries: int = 3
-    retry_delay: float = 2.0
+    max_retries: int = 6
+    retry_delay: float = 4.0
+    rate_limit_cooldown: float = 2.0  # Extra delay between requests to avoid 429s
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

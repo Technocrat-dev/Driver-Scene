@@ -64,8 +64,8 @@ def evaluate_with_judge(
         overall scores, and reasoning.
     """
     if client is None:
-        from src.vlm.client import GeminiClient
-        client = GeminiClient()
+        from src.vlm import create_vlm_client
+        client = create_vlm_client()
 
     prompt = JUDGE_PROMPT.format(
         ground_truth=ground_truth_text,

@@ -81,7 +81,7 @@ def run_generate(
     """
     from src.data.ground_truth import load_ground_truths
     from src.prompts.templates import get_prompt, get_prompt_info
-    from src.vlm.client import GeminiClient
+    from src.vlm import create_vlm_client
 
     prompt_text = get_prompt(prompt_id)
     prompt_info = get_prompt_info(prompt_id)
@@ -109,7 +109,7 @@ def run_generate(
     logger.info(f"Total: {len(image_names)}, Already done: {len(processed)}, Remaining: {len(remaining)}")
 
     # Initialize client
-    client = GeminiClient()
+    client = create_vlm_client()
     results = []
 
     # Load existing results if any
@@ -182,6 +182,7 @@ def run_evaluate(
     from src.evaluation.completeness import compute_completeness
     from src.evaluation.count_accuracy import compute_count_accuracy
     from src.evaluation.hallucination import compute_hallucination
+    from src.evaluation.spatial import compute_spatial_accuracy
 
     if run_dir is None:
         run_dir = results_file.parent
@@ -220,8 +221,8 @@ def run_evaluate(
     # Per-image evaluation
     judge_client = None
     if use_judge:
-        from src.vlm.client import GeminiClient
-        judge_client = GeminiClient()
+        from src.vlm import create_vlm_client
+        judge_client = create_vlm_client()
 
     for batch_idx, result_idx in enumerate(tqdm(valid_indices, desc="Evaluating")):
         result = results[result_idx]
@@ -259,6 +260,9 @@ def run_evaluate(
         weather_match = _check_weather_match(desc.weather, gt.weather)
         lighting_match = _check_lighting_match(desc.lighting, gt.timeofday)
 
+        # Spatial grounding
+        spatial = compute_spatial_accuracy(desc.objects, gt.objects, gt.raw_labels)
+
         eval_result = EvaluationResult(
             image_name=image_name,
             prompt_id=prompt_id,
@@ -275,6 +279,7 @@ def run_evaluate(
             lighting_match=lighting_match,
             judge_score=judge_score,
             judge_reasoning=judge_reasoning,
+            spatial_accuracy=spatial.zone_accuracy,
         )
         evaluations.append(eval_result)
 
@@ -290,6 +295,7 @@ def run_evaluate(
         avg_comp = sum(e.completeness_score for e in evaluations) / len(evaluations)
         avg_mae = sum(e.count_accuracy_mae for e in evaluations) / len(evaluations)
         avg_ratio = sum(e.count_accuracy_ratio for e in evaluations) / len(evaluations)
+        avg_spatial = sum(e.spatial_accuracy for e in evaluations) / len(evaluations)
         print(f"\n{'='*60}")
         print(f"Evaluation Summary ({len(evaluations)} images)")
         print(f"{'='*60}")
@@ -298,6 +304,7 @@ def run_evaluate(
         print(f"  Avg Completeness:        {avg_comp:.4f}")
         print(f"  Avg Count MAE:           {avg_mae:.4f}")
         print(f"  Avg Count Ratio:         {avg_ratio:.4f}")
+        print(f"  Avg Spatial Accuracy:    {avg_spatial:.4f}")
         if use_judge:
             avg_judge = sum(e.judge_score for e in evaluations if e.judge_score) / max(
                 len([e for e in evaluations if e.judge_score]), 1
@@ -425,6 +432,9 @@ def run_compare(
                     lighting_accuracy=round(
                         sum(1 for e in evaluations if e.lighting_match) / len(evaluations), 4
                     ),
+                    avg_spatial_accuracy=round(
+                        sum(e.spatial_accuracy for e in evaluations) / len(evaluations), 4
+                    ),
                 )
                 comparison_rows.append(row)
 
@@ -523,6 +533,119 @@ def _export_training_data(
     print("Format: JSONL (messages format for SFT)")
     print(f"Skipped: {len(results) - len(valid)} failed generations")
 
+# ── Temporal Mode ──────────────────────────────────────────────────────────────
+
+
+def run_temporal(
+    prompt_id: str = "v8_combined",
+    limit: int | None = None,
+) -> Path:
+    """Process video frame sequences to generate scene evolution descriptions.
+
+    Groups BDD100K images by video ID and processes consecutive frames,
+    passing previous descriptions to the VLM for temporal context.
+
+    Args:
+        prompt_id: Base prompt variant for first-frame description.
+        limit: Maximum number of sequences to process.
+
+    Returns:
+        Path to the output directory.
+    """
+    from src.data.ground_truth import load_ground_truths
+    from src.data.temporal import build_temporal_prompt, find_video_sequences
+    from src.vlm import create_vlm_client
+
+    run_dir = get_run_dir(f"temporal_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+    image_dir = settings.sampled_dir / "images"
+
+    # Get all image names
+    gts = load_ground_truths()
+    image_names = sorted(gts.keys())
+    sequences = find_video_sequences(image_names, min_frames=2)
+
+    if not sequences:
+        logger.warning("No video sequences with 2+ frames found in the dataset.")
+        logger.info("The sampled dataset uses mostly single frames per video.")
+        logger.info("Processing frame pairs from adjacent images as pseudo-sequences...")
+
+        # Create pseudo-sequences from adjacent frames for demonstration
+        from src.data.temporal import FrameInfo, VideoSequence
+        pseudo_seqs = []
+        for i in range(0, min(len(image_names), 10), 2):
+            if i + 1 < len(image_names):
+                seq = VideoSequence(
+                    video_id=f"pseudo_{i}",
+                    frames=[
+                        FrameInfo(image_name=image_names[i], frame_id="0", index=i),
+                        FrameInfo(image_name=image_names[i + 1], frame_id="1", index=i + 1),
+                    ],
+                )
+                pseudo_seqs.append(seq)
+        sequences = pseudo_seqs
+        logger.info(f"Created {len(sequences)} pseudo-sequences for temporal demonstration")
+
+    if limit:
+        sequences = sequences[:limit]
+
+    client = create_vlm_client()
+    all_results = []
+
+    for seq in tqdm(sequences, desc="Processing sequences"):
+        seq_results = {
+            "video_id": seq.video_id,
+            "n_frames": seq.n_frames,
+            "frames": [],
+        }
+
+        prev_desc_text = None
+
+        for frame_idx, frame in enumerate(seq.frames):
+            image_path = image_dir / frame.image_name
+            if not image_path.exists():
+                logger.warning(f"Image not found: {image_path}")
+                continue
+
+            # Build temporal prompt
+            temporal_prompt = build_temporal_prompt(
+                previous_description=prev_desc_text,
+                frame_number=frame_idx + 1,
+                total_frames=seq.n_frames,
+            )
+
+            # Process with VLM
+            description = client.analyze_image(image_path, temporal_prompt)
+
+            frame_result = {
+                "image_name": frame.image_name,
+                "frame_index": frame_idx,
+                "is_temporal": frame_idx > 0,
+                "description": description.model_dump() if description else None,
+            }
+            seq_results["frames"].append(frame_result)
+
+            # Save description for next frame's context
+            if description:
+                prev_desc_text = description.model_dump_json(indent=2)
+
+        all_results.append(seq_results)
+
+    # Save results
+    output_file = run_dir / "temporal_results.json"
+    with open(output_file, "w") as f:
+        json.dump(all_results, f, indent=2)
+
+    logger.info(f"Temporal results saved to {output_file}")
+    print(f"\n{'='*60}")
+    print(f"Temporal Processing Complete")
+    print(f"{'='*60}")
+    print(f"  Sequences processed: {len(all_results)}")
+    print(f"  Total frames:        {sum(s['n_frames'] for s in all_results)}")
+    print(f"  Output:              {output_file}")
+    print(f"{'='*60}\n")
+
+    return run_dir
+
 
 # ── CLI Entry Point ───────────────────────────────────────────────────────────
 
@@ -595,6 +718,11 @@ Examples:
     # List prompts
     subparsers.add_parser("list-prompts", help="List available prompt variants")
 
+    # Temporal analysis
+    temp = subparsers.add_parser("temporal", help="Process video frame sequences for scene evolution")
+    temp.add_argument("--prompt", default="v8_combined", help="Base prompt variant ID")
+    temp.add_argument("--limit", type=int, default=None, help="Max sequences to process")
+
     # Export training data
     export = subparsers.add_parser("export-training", help="Export results as SFT training data")
     export.add_argument("--results", required=True, type=Path, help="Path to results JSON")
@@ -656,6 +784,9 @@ Examples:
 
     elif args.command == "export-training":
         _export_training_data(args.results, args.output, args.prompt)
+
+    elif args.command == "temporal":
+        run_temporal(prompt_id=args.prompt, limit=args.limit)
 
     else:
         parser.print_help()

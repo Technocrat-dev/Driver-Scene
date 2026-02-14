@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
+from typing import Any
 
 
 # ── VLM Output Schema ─────────────────────────────────────────────────────────
@@ -58,6 +59,10 @@ class GroundTruth(BaseModel):
     description: str = Field(
         default="", description="Templated natural language description from GT labels"
     )
+    raw_labels: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Raw BDD100K label entries with box2d for spatial evaluation",
+    )
 
 
 # ── Evaluation ────────────────────────────────────────────────────────────────
@@ -81,6 +86,7 @@ class EvaluationResult(BaseModel):
     lighting_match: bool = False
     judge_score: float | None = None
     judge_reasoning: str = ""
+    spatial_accuracy: float = 0.0
 
 
 class PromptComparisonRow(BaseModel):
@@ -96,3 +102,4 @@ class PromptComparisonRow(BaseModel):
     avg_count_mae: float = 0.0
     weather_accuracy: float = 0.0
     lighting_accuracy: float = 0.0
+    avg_spatial_accuracy: float = 0.0

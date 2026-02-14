@@ -1,16 +1,21 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Driving Scene Generator — Results Dashboard</title>
-    <meta name="description" content="Interactive dashboard for VLM prompt comparison and evaluation metrics visualization">
+    <meta name="description"
+        content="Interactive dashboard for VLM prompt comparison and evaluation metrics visualization">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
     <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
     <!-- Header -->
     <header class="header">
@@ -18,8 +23,8 @@
             <div class="logo-group">
                 <div class="logo-icon">
                     <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="10"/>
-                        <path d="M12 6v6l4 2"/>
+                        <circle cx="12" cy="12" r="10" />
+                        <path d="M12 6v6l4 2" />
                     </svg>
                 </div>
                 <div>
@@ -34,9 +39,9 @@
                 </div>
                 <label class="file-upload" for="fileInput">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                        <polyline points="17 8 12 3 7 8"/>
-                        <line x1="12" y1="3" x2="12" y2="15"/>
+                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                        <polyline points="17 8 12 3 7 8" />
+                        <line x1="12" y1="3" x2="12" y2="15" />
                     </svg>
                     Load Results
                 </label>
@@ -121,13 +126,17 @@
                             <th>BERTScore F1</th>
                             <th>Hallucination</th>
                             <th>Completeness</th>
+                            <th>Count MAE</th>
                             <th>Weather Acc</th>
                             <th>Lighting Acc</th>
                             <th>Judge Score</th>
+                            <th>Spatial Acc</th>
                         </tr>
                     </thead>
                     <tbody id="tableBody">
-                        <tr><td colspan="9" class="empty-state">Load comparison_table.json to view results</td></tr>
+                        <tr>
+                            <td colspan="10" class="empty-state">Load comparison_table.json to view results</td>
+                        </tr>
                     </tbody>
                 </table>
             </div>
@@ -151,11 +160,11 @@
         <section class="card empty-card" id="emptyState">
             <div class="empty-icon">
                 <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-                    <polyline points="14 2 14 8 20 8"/>
-                    <line x1="16" y1="13" x2="8" y2="13"/>
-                    <line x1="16" y1="17" x2="8" y2="17"/>
-                    <polyline points="10 9 9 9 8 9"/>
+                    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="16" y1="13" x2="8" y2="13" />
+                    <line x1="16" y1="17" x2="8" y2="17" />
+                    <polyline points="10 9 9 9 8 9" />
                 </svg>
             </div>
             <h3>No Results Loaded</h3>
@@ -163,7 +172,8 @@
             <div class="code-block">
                 <code>python -m src.pipeline compare --limit 10</code>
             </div>
-            <p>Then click <strong>"Load Results"</strong> and select <code>comparison_table.json</code> from the outputs folder.</p>
+            <p>Then click <strong>"Load Results"</strong> and select <code>comparison_table.json</code> from the outputs
+                folder.</p>
         </section>
     </main>
 
@@ -174,4 +184,5 @@
 
     <script src="app.js"></script>
 </body>
+
 </html>

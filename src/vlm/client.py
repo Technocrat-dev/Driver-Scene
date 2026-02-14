@@ -49,7 +49,7 @@ class RateLimiter:
         self._minute_timestamps = [t for t in self._minute_timestamps if now - t < 60]
         if len(self._minute_timestamps) >= self.rpm:
             oldest = self._minute_timestamps[0]
-            sleep_time = 60 - (now - oldest) + 0.5
+            sleep_time = 60 - (now - oldest) + 1.0
             logger.info(f"Rate limit: waiting {sleep_time:.1f}s")
             time.sleep(sleep_time)
 
@@ -110,6 +110,10 @@ class GeminiClient:
             try:
                 self.rate_limiter.wait_if_needed()
 
+                # Cool down between requests to avoid bursting
+                if settings.rate_limit_cooldown > 0:
+                    time.sleep(settings.rate_limit_cooldown)
+
                 response = self.client.models.generate_content(
                     model=self.model_name,
                     contents=[
@@ -141,15 +145,14 @@ class GeminiClient:
 
             except Exception as e:
                 error_msg = str(e)
+                wait_time = min(settings.retry_delay * (2**attempt), 60.0)
                 if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
-                    wait_time = settings.retry_delay * (2**attempt)
                     logger.warning(
                         f"Rate limit hit (attempt {attempt + 1}/{retries + 1}). "
                         f"Waiting {wait_time:.1f}s"
                     )
                     time.sleep(wait_time)
                 elif attempt < retries:
-                    wait_time = settings.retry_delay * (2**attempt)
                     logger.warning(
                         f"Error on attempt {attempt + 1}/{retries + 1}: {error_msg}. "
                         f"Retrying in {wait_time:.1f}s"

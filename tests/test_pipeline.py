@@ -369,3 +369,157 @@ class TestErrorAnalyzerAgent:
         improved = agent.generate_improved_prompt(original, report)
         assert "CORRECTIONS" in improved
         assert "buses" in improved
+
+
+# ── Spatial Grounding Tests ──────────────────────────────────────────────────
+
+
+class TestSpatialGrounding:
+    """Test spatial zone evaluation."""
+
+    def test_bbox_to_zone_center(self):
+        from src.evaluation.spatial import bbox_to_zone, HorizontalZone, VerticalZone
+
+        # Center of frame (640, 360 in 1280×720)
+        box = {"x1": 600, "y1": 340, "x2": 680, "y2": 380}
+        zone = bbox_to_zone(box)
+        assert zone.horizontal == HorizontalZone.CENTER
+        assert zone.vertical == VerticalZone.MID
+
+    def test_bbox_to_zone_left_near(self):
+        from src.evaluation.spatial import bbox_to_zone, HorizontalZone, VerticalZone
+
+        # Bottom-left (close to camera, left side)
+        box = {"x1": 0, "y1": 600, "x2": 100, "y2": 700}
+        zone = bbox_to_zone(box)
+        assert zone.horizontal == HorizontalZone.LEFT
+        assert zone.vertical == VerticalZone.NEAR
+
+    def test_bbox_to_zone_right_far(self):
+        from src.evaluation.spatial import bbox_to_zone, HorizontalZone, VerticalZone
+
+        # Top-right (far from camera, right side)
+        box = {"x1": 1000, "y1": 50, "x2": 1100, "y2": 150}
+        zone = bbox_to_zone(box)
+        assert zone.horizontal == HorizontalZone.RIGHT
+        assert zone.vertical == VerticalZone.FAR
+
+    def test_text_to_zones_ahead(self):
+        from src.evaluation.spatial import text_to_zones, HorizontalZone, VerticalZone
+
+        zones = text_to_zones("2 cars ahead in the same lane")
+        assert len(zones) == 1
+        assert zones[0].horizontal == HorizontalZone.CENTER
+
+    def test_text_to_zones_left(self):
+        from src.evaluation.spatial import text_to_zones, HorizontalZone
+
+        zones = text_to_zones("1 truck in the left lane")
+        assert zones[0].horizontal == HorizontalZone.LEFT
+
+    def test_text_to_zones_parked_right(self):
+        from src.evaluation.spatial import text_to_zones, HorizontalZone
+
+        zones = text_to_zones("parked on the right side")
+        assert zones[0].horizontal == HorizontalZone.RIGHT
+
+    def test_text_to_zones_empty(self):
+        from src.evaluation.spatial import text_to_zones, HorizontalZone, VerticalZone
+
+        # Empty string defaults to center/mid
+        zones = text_to_zones("")
+        assert zones[0].horizontal == HorizontalZone.CENTER
+        assert zones[0].vertical == VerticalZone.MID
+
+    def test_perfect_spatial_match(self):
+        from src.evaluation.spatial import compute_spatial_accuracy
+
+        predicted = [
+            DetectedObject(category="car", count=2, details="2 cars ahead"),
+        ]
+        gt_objects = {"car": 2}
+        # Two cars in center of frame
+        gt_labels = [
+            {"category": "car", "box2d": {"x1": 500, "y1": 350, "x2": 600, "y2": 400}},
+            {"category": "car", "box2d": {"x1": 620, "y1": 340, "x2": 720, "y2": 390}},
+        ]
+
+        result = compute_spatial_accuracy(predicted, gt_objects, gt_labels)
+        assert result.zone_accuracy > 0
+
+    def test_spatial_mismatch(self):
+        from src.evaluation.spatial import compute_spatial_accuracy
+
+        # Predict objects on the right, but GT has them on the left
+        predicted = [
+            DetectedObject(category="car", count=2, details="2 cars on the right side"),
+        ]
+        gt_objects = {"car": 2}
+        gt_labels = [
+            {"category": "car", "box2d": {"x1": 50, "y1": 350, "x2": 150, "y2": 400}},
+            {"category": "car", "box2d": {"x1": 100, "y1": 340, "x2": 200, "y2": 390}},
+        ]
+
+        result = compute_spatial_accuracy(predicted, gt_objects, gt_labels)
+        assert result.zone_accuracy < 1.0
+
+    def test_empty_gt(self):
+        from src.evaluation.spatial import compute_spatial_accuracy
+
+        predicted = [DetectedObject(category="car", count=1, details="ahead")]
+        result = compute_spatial_accuracy(predicted, {}, [])
+        assert result.zone_accuracy == 0.0
+
+
+# ── Temporal Tests ───────────────────────────────────────────────────────────
+
+
+class TestTemporal:
+    """Test temporal scene description module."""
+
+    def test_extract_video_id(self):
+        from src.data.temporal import extract_video_id
+
+        vid, fid = extract_video_id("c0035eda-6e1b34d6.jpg")
+        assert vid == "c0035eda"
+        assert fid == "6e1b34d6"
+
+    def test_find_video_sequences(self):
+        from src.data.temporal import find_video_sequences
+
+        images = [
+            "aaa-001.jpg", "aaa-002.jpg", "aaa-003.jpg",  # 3-frame sequence
+            "bbb-001.jpg", "bbb-002.jpg",                  # 2-frame sequence
+            "ccc-001.jpg",                                   # single frame
+        ]
+        seqs = find_video_sequences(images, min_frames=2)
+        assert len(seqs) == 2
+        assert seqs[0].video_id == "aaa"
+        assert seqs[0].n_frames == 3
+        assert seqs[1].video_id == "bbb"
+        assert seqs[1].n_frames == 2
+
+    def test_find_no_sequences(self):
+        from src.data.temporal import find_video_sequences
+
+        images = ["aaa-001.jpg", "bbb-002.jpg", "ccc-003.jpg"]
+        seqs = find_video_sequences(images, min_frames=2)
+        assert len(seqs) == 0
+
+    def test_temporal_prompt_first_frame(self):
+        from src.data.temporal import build_temporal_prompt
+
+        prompt = build_temporal_prompt(previous_description=None, frame_number=1, total_frames=3)
+        assert "frame 1 of 3" in prompt
+        assert "JSON" in prompt
+
+    def test_temporal_prompt_subsequent_frame(self):
+        from src.data.temporal import build_temporal_prompt
+
+        prev = '{"summary": "A clear daytime city street."}'
+        prompt = build_temporal_prompt(previous_description=prev, frame_number=2, total_frames=3)
+        assert "frame 2 of 3" in prompt
+        assert "PREVIOUS" in prompt
+        assert "scene_changes" in prompt
+
+
