@@ -99,7 +99,7 @@ class TestEvaluateAndExport:
         gt = GroundTruth(
             image_name="test.jpg",
             weather="clear",
-            time_of_day="daytime",
+            timeofday="daytime",
             scene="city street",
             objects={"car": 3, "person": 2, "traffic light": 1},
             description="A driving scene on city street during daytime with clear conditions.",

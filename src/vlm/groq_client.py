@@ -12,18 +12,12 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any
 
 from src.config import settings
 from src.models import SceneDescription
+from src.vlm.client import RateLimiter
 
 logger = logging.getLogger(__name__)
-
-# Groq vision models ranked by capability
-GROQ_VISION_MODELS = [
-    "llama-3.2-90b-vision-preview",   # Best quality
-    "llama-3.2-11b-vision-preview",   # Faster, still good
-]
 
 
 class GroqClient:
@@ -54,6 +48,7 @@ class GroqClient:
             )
 
         self.client = Groq(api_key=self.api_key)
+        self.rate_limiter = RateLimiter(rpm=30, rpd=14400)
         self._request_count = 0
 
     def generate_scene_description(
@@ -86,6 +81,8 @@ class GroqClient:
 
         for attempt in range(retries + 1):
             try:
+                self.rate_limiter.wait_if_needed()
+
                 response = self.client.chat.completions.create(
                     model=self.model_name,
                     messages=[
@@ -196,4 +193,4 @@ class GroqClient:
 
     @property
     def requests_remaining(self) -> int:
-        return 14400 - self._request_count  # Approximate
+        return self.rate_limiter.requests_remaining_today

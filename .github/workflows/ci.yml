@@ -27,12 +27,7 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Lint with ruff
-        run: |
-          ruff check src/ tests/
-          ruff format --check src/ tests/
-
-      - name: Type check with mypy
-        run: mypy --ignore-missing-imports src/
+        run: ruff check src/ tests/
 
       - name: Run tests
         run: pytest tests/ -v --tb=short

@@ -1,6 +1,6 @@
-"""LLM-as-judge evaluation: use Gemini to rate description quality.
+"""LLM-as-judge evaluation: use a VLM to rate description quality.
 
-Uses Gemini to evaluate VLM outputs on:
+Supports both Gemini and Groq backends. Evaluates VLM outputs on:
 - Accuracy: Are the objects and conditions described correctly?
 - Completeness: Does the description cover all important elements?
 - Safety relevance: Are hazards and actions appropriate?
@@ -45,19 +45,80 @@ Respond with JSON only:
   "reasoning": "Brief explanation of your ratings"
 }}"""
 
+_EMPTY_RESULT: dict[str, Any] = {
+    "accuracy": 0,
+    "completeness": 0,
+    "safety_relevance": 0,
+    "actionability": 0,
+    "overall": 0,
+    "reasoning": "Evaluation failed",
+}
+
+
+def _judge_with_gemini(client, prompt: str) -> dict[str, Any]:
+    """Run judge evaluation using the Gemini API."""
+    from google.genai import types
+
+    client.rate_limiter.wait_if_needed()
+
+    response = client.client.models.generate_content(
+        model=client.model_name,
+        contents=[
+            types.Content(
+                role="user",
+                parts=[types.Part.from_text(text=prompt)],
+            )
+        ],
+        config=types.GenerateContentConfig(
+            temperature=0.1,
+            response_mime_type="application/json",
+        ),
+    )
+
+    if response.text:
+        return json.loads(response.text)
+    return {}
+
+
+def _judge_with_groq(client, prompt: str) -> dict[str, Any]:
+    """Run judge evaluation using the Groq API."""
+    client.rate_limiter.wait_if_needed()
+
+    response = client.client.chat.completions.create(
+        model=client.model_name,
+        messages=[
+            {
+                "role": "system",
+                "content": "You are an expert evaluator. Respond with valid JSON only.",
+            },
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.1,
+        max_tokens=512,
+        response_format={"type": "json_object"},
+    )
+
+    text = response.choices[0].message.content
+    if text:
+        return json.loads(text)
+    return {}
+
 
 def evaluate_with_judge(
     prediction_text: str,
     ground_truth_text: str,
-    client=None,
+    client: Any = None,
 ) -> dict[str, Any]:
     """
-    Use Gemini as a judge to evaluate a scene description.
+    Use a VLM as a judge to evaluate a scene description.
+
+    Supports both Gemini and Groq backends — the correct API is selected
+    automatically based on the client type.
 
     Args:
         prediction_text: The VLM-generated scene description (JSON string or summary).
         ground_truth_text: The ground truth description from BDD100K.
-        client: Optional GeminiClient instance (creates one if not provided).
+        client: Optional VLM client instance (creates one via factory if not provided).
 
     Returns:
         Dict with accuracy, completeness, safety_relevance, actionability,
@@ -73,42 +134,22 @@ def evaluate_with_judge(
     )
 
     try:
-        from google.genai import types
+        from src.vlm.groq_client import GroqClient
 
-        client.rate_limiter.wait_if_needed()
+        if isinstance(client, GroqClient):
+            result = _judge_with_groq(client, prompt)
+        else:
+            result = _judge_with_gemini(client, prompt)
 
-        response = client.client.models.generate_content(
-            model=client.model_name,
-            contents=[
-                types.Content(
-                    role="user",
-                    parts=[types.Part.from_text(text=prompt)],
-                )
-            ],
-            config=types.GenerateContentConfig(
-                temperature=0.1,
-                response_mime_type="application/json",
-            ),
-        )
-
-        if response.text:
-            result = json.loads(response.text)
-            return {
-                "accuracy": result.get("accuracy", 0),
-                "completeness": result.get("completeness", 0),
-                "safety_relevance": result.get("safety_relevance", 0),
-                "actionability": result.get("actionability", 0),
-                "overall": result.get("overall", 0),
-                "reasoning": result.get("reasoning", ""),
-            }
+        return {
+            "accuracy": result.get("accuracy", 0),
+            "completeness": result.get("completeness", 0),
+            "safety_relevance": result.get("safety_relevance", 0),
+            "actionability": result.get("actionability", 0),
+            "overall": result.get("overall", 0),
+            "reasoning": result.get("reasoning", ""),
+        }
     except Exception as e:
         logger.warning(f"Judge evaluation failed: {e}")
 
-    return {
-        "accuracy": 0,
-        "completeness": 0,
-        "safety_relevance": 0,
-        "actionability": 0,
-        "overall": 0,
-        "reasoning": "Evaluation failed",
-    }
+    return dict(_EMPTY_RESULT)

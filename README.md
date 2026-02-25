@@ -28,7 +28,7 @@ graph LR
 
 - **8 systematically designed prompt variants** — from zero-shot baseline to optimized CoT+grounding combinations
 - **Structured JSON outputs** — scene summaries, object detection, weather/lighting classification, hazard identification, and meta-actions (brake, accelerate, lane change, yield)
-- **7-metric evaluation framework** — BERTScore semantic similarity, hallucination rate, completeness scoring, count accuracy, spatial grounding, weather/lighting accuracy, and LLM-as-judge
+- **8-metric evaluation framework** — BERTScore semantic similarity, hallucination rate, completeness scoring, count accuracy, spatial grounding, weather/lighting accuracy, and LLM-as-judge
 - **Spatial grounding evaluation** — 3×3 zone grid (left/center/right × near/mid/far) comparing VLM spatial descriptions against BDD100K bounding boxes
 - **Temporal scene description** — video frame sequence processing with scene evolution tracking
 - **Dual VLM backend** — supports **Gemini** (Google) and **Groq** (Llama 3.2 Vision) with one config switch
@@ -170,15 +170,18 @@ docker-compose run pipeline generate --prompt v1_baseline --limit 5
 ├── docker-compose.yml      # Docker Compose orchestration
 ├── .env.example            # Environment variable template
 ├── src/
+│   ├── cli.py              # CLI argument parsing & dispatch
 │   ├── config.py           # Settings (pydantic-settings)
 │   ├── models.py           # Pydantic data models
-│   ├── pipeline.py         # CLI orchestrator
+│   ├── pipeline.py         # Pipeline orchestrator (generate, evaluate, compare)
 │   ├── data/
 │   │   ├── downloader.py   # BDD100K sampler
 │   │   ├── ground_truth.py # GT label parser (enriched descriptions)
 │   │   └── temporal.py     # Video frame sequence processing
 │   ├── vlm/
-│   │   └── client.py       # Gemini API client
+│   │   ├── __init__.py     # VLM client factory (Gemini / Groq)
+│   │   ├── client.py       # Gemini API client + rate limiter
+│   │   └── groq_client.py  # Groq API client (Llama Vision)
 │   ├── prompts/
 │   │   ├── templates.py    # 8 prompt variants
 │   │   └── registry.py     # Prompt management
@@ -192,7 +195,8 @@ docker-compose run pipeline generate --prompt v1_baseline --limit 5
 │   └── agent/
 │       └── analyzer.py     # AI agent: error analysis & prompt improvement
 ├── tests/
-│   └── test_pipeline.py    # 44 unit tests
+│   ├── test_pipeline.py    # Unit tests (models, evaluation, prompts, agent)
+│   └── test_integration.py # Integration tests (full evaluate + export flow)
 ├── dashboard/
 │   ├── index.html          # Results visualization
 │   ├── styles.css          # Dashboard styling
@@ -223,7 +227,8 @@ python -m src.pipeline analyze --results outputs/<run>/evaluation_results_v1_bas
 ## Tech Stack
 
 - **Python 3.11** with type hints and Pydantic v2
-- **Gemini 2.5 Flash-Lite** (free tier, 1,000 RPD) for VLM inference
+- **Groq** (Llama 4 Scout 17B, free tier, 14,400 RPD) — recommended VLM backend
+- **Gemini 2.5 Flash-Lite** (free tier, 1,000 RPD) — alternative VLM backend
 - **BERTScore** with RoBERTa-large for semantic evaluation
 - **Docker** for reproducible deployment
 
@@ -231,14 +236,19 @@ python -m src.pipeline analyze --results outputs/<run>/evaluation_results_v1_bas
 
 ## Rate Limit Strategy
 
-The free Gemini tier (Flash-Lite) allows ~1,000 requests/day. This pipeline is designed for that constraint:
+The pipeline is designed for free-tier API constraints with smart rate limiting and checkpoint/resume:
 
-| Experiment | Images | Prompts | API Calls | Days |
-|-----------|--------|---------|-----------|------|
-| Quick test | 5 | 1 | 5 | <1 |
-| Single prompt eval | 50 | 1 | 50 | <1 |
-| Full comparison | 50 | 8 | 400 | <1 |
-| Production run | 200 | 1 (best) | 200 | <1 |
+| Provider | RPD | RPM | 8-variant × 10 images | Notes |
+|----------|-----|-----|----------------------|-------|
+| **Groq** (recommended) | 14,400 | 30 | ~3 minutes | Proactive sliding-window limiter |
+| **Gemini** | ~1,000 | 15 | 18+ minutes | Exponential backoff on 429s |
+
+| Experiment | Images | Prompts | API Calls | Time (Groq) |
+|-----------|--------|---------|-----------|-------------|
+| Quick test | 5 | 1 | 5 | <1 min |
+| Single prompt eval | 50 | 1 | 50 | ~2 min |
+| Full comparison | 50 | 8 | 400 | ~15 min |
+| Production run | 200 | 1 (best) | 200 | ~8 min |
 
 The pipeline supports **checkpoint/resume** — if interrupted, it picks up where it left off.
 
@@ -306,9 +316,9 @@ The AI agent's error analysis identifies systematic failure modes (e.g., halluci
 
 ## Future Work
 
-- **Temporal scene description** — Process consecutive BDD100K video frames to generate scene evolution narratives (e.g., "vehicle ahead is braking" → "intersection approaching"). This would better reflect real AD perception pipelines that reason over time.
-- **Multi-model comparison** — Benchmark Gemini vs. GPT-4V vs. open-source VLMs (LLaVA, Qwen-VL) on the same evaluation framework.
-- **Spatial grounding** — Add bounding box prediction evaluation comparing VLM spatial descriptions against BDD100K box annotations.
+- **Multi-model comparison** — Benchmark across GPT-4V, Claude, and open-source VLMs (LLaVA, Qwen-VL) on the same evaluation framework.
+- **Fine-tuning loop** — Use the exported training data (JSONL) to LoRA fine-tune a VLM and re-evaluate with the pipeline, completing the full improvement cycle.
+- **Confidence calibration** — Add confidence scores to VLM outputs and evaluate calibration against ground truth accuracy.
 
 ## References
 

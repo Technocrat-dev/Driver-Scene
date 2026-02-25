@@ -128,8 +128,6 @@ def compute_hallucination(
             false_negatives.append(cat)
 
     # Compute rates
-    _n_predicted = len([c for c in pred_counts if c in BDD100K_CATEGORIES or c in gt_counts])
-    _n_gt = len(gt_counts)
     n_union = len(all_categories)
 
     if n_union == 0:

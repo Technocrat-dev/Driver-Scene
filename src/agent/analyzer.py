@@ -6,7 +6,6 @@ This module implements an AI agent that:
 3. Generates actionable suggestions for prompt improvement
 4. Can auto-generate improved prompt variants based on error analysis
 
-Maps to Woven JD: "Development of AI agents to support MLOps tasks"
 """
 
 from __future__ import annotations

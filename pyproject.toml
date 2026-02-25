@@ -26,7 +26,7 @@ dev = [
 ]
 
 [project.scripts]
-dsg = "src.pipeline:main"
+dsg = "src.cli:main"
 
 [tool.ruff]
 line-length = 100

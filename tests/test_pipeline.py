@@ -405,7 +405,7 @@ class TestSpatialGrounding:
         assert zone.vertical == VerticalZone.FAR
 
     def test_text_to_zones_ahead(self):
-        from src.evaluation.spatial import text_to_zones, HorizontalZone, VerticalZone
+        from src.evaluation.spatial import text_to_zones, HorizontalZone
 
         zones = text_to_zones("2 cars ahead in the same lane")
         assert len(zones) == 1
@@ -523,3 +523,207 @@ class TestTemporal:
         assert "scene_changes" in prompt
 
 
+# ── Weather / Lighting Match Tests ───────────────────────────────────────────
+
+
+class TestWeatherLightingMatch:
+    """Test the _check_weather_match and _check_lighting_match helpers in pipeline.py."""
+
+    def test_exact_weather_match(self):
+        from src.pipeline import _check_weather_match
+        assert _check_weather_match("clear", "clear") is True
+
+    def test_weather_synonym_rainy(self):
+        from src.pipeline import _check_weather_match
+        assert _check_weather_match("rain", "rainy") is True
+        assert _check_weather_match("rainy", "rain") is True
+
+    def test_weather_overcast_cloudy(self):
+        from src.pipeline import _check_weather_match
+        assert _check_weather_match("cloudy", "overcast") is True
+
+    def test_weather_mismatch(self):
+        from src.pipeline import _check_weather_match
+        assert _check_weather_match("clear", "rainy") is False
+
+    def test_weather_undefined_gt_is_always_true(self):
+        from src.pipeline import _check_weather_match
+        assert _check_weather_match("clear", "undefined") is True
+        assert _check_weather_match("anything", "unknown") is True
+        assert _check_weather_match("foggy", "") is True
+
+    def test_lighting_exact_match(self):
+        from src.pipeline import _check_lighting_match
+        assert _check_lighting_match("night", "night") is True
+
+    def test_lighting_synonyms(self):
+        from src.pipeline import _check_lighting_match
+        assert _check_lighting_match("nighttime", "night") is True
+        assert _check_lighting_match("day", "daytime") is True
+
+    def test_lighting_dawn_dusk(self):
+        from src.pipeline import _check_lighting_match
+        assert _check_lighting_match("dawn", "dawn/dusk") is True
+        assert _check_lighting_match("dusk", "dawn/dusk") is True
+        assert _check_lighting_match("twilight", "dawn/dusk") is True
+
+    def test_lighting_mismatch(self):
+        from src.pipeline import _check_lighting_match
+        assert _check_lighting_match("daytime", "night") is False
+
+    def test_lighting_undefined_gt_is_always_true(self):
+        from src.pipeline import _check_lighting_match
+        assert _check_lighting_match("daytime", "undefined") is True
+        assert _check_lighting_match("night", "") is True
+
+
+# ── Rate Limiter Tests ───────────────────────────────────────────────────────
+
+
+class TestRateLimiter:
+    """Test the RateLimiter class from vlm.client."""
+
+    def test_requests_remaining(self):
+        from src.vlm.client import RateLimiter
+        limiter = RateLimiter(rpm=10, rpd=100)
+        assert limiter.requests_remaining_today == 100
+
+    def test_count_decrements_after_wait(self):
+        from src.vlm.client import RateLimiter
+        limiter = RateLimiter(rpm=60, rpd=100)
+        limiter.wait_if_needed()
+        assert limiter.requests_remaining_today == 99
+
+    def test_daily_limit_raises(self):
+        from src.vlm.client import RateLimiter
+        limiter = RateLimiter(rpm=100, rpd=2)
+        limiter.wait_if_needed()
+        limiter.wait_if_needed()
+        with pytest.raises(RuntimeError, match="Daily rate limit"):
+            limiter.wait_if_needed()
+
+
+# ── Fallback Parse Tests ─────────────────────────────────────────────────────
+
+
+class TestFallbackParse:
+    """Test VLM client _fallback_parse methods."""
+
+    def test_gemini_fallback_extracts_json_from_text(self):
+        from src.vlm.client import GeminiClient
+
+        # Create a client without API key for parse testing only
+        client = object.__new__(GeminiClient)
+
+        text = 'Here is the result: {"summary": "Test", "weather": "clear", "lighting": "daytime", "road_type": "highway", "objects": [], "hazards": [], "meta_actions": []} done!'
+        result = client._fallback_parse(text)
+        assert result is not None
+        assert result.summary == "Test"
+        assert result.weather == "clear"
+
+    def test_fallback_returns_none_on_garbage(self):
+        from src.vlm.client import GeminiClient
+
+        client = object.__new__(GeminiClient)
+        result = client._fallback_parse("this is not json at all")
+        assert result is None
+
+
+# ── Partial Completeness Tests ───────────────────────────────────────────────
+
+
+class TestCompletenessPartial:
+    """Test partial scoring edge cases for completeness."""
+
+    def test_short_summary_scores_half(self):
+        from src.evaluation.completeness import compute_completeness
+
+        desc = SceneDescription(
+            summary="Short",
+            weather="clear",
+            lighting="daytime",
+            road_type="highway",
+        )
+        scores = compute_completeness(desc)
+        assert scores["summary"] == 0.5
+
+    def test_one_object_partial_score(self):
+        from src.evaluation.completeness import compute_completeness
+
+        desc = SceneDescription(
+            summary="A clear daytime highway scene with one vehicle visible.",
+            objects=[DetectedObject(category="car", count=1)],
+            weather="clear",
+            lighting="daytime",
+            road_type="highway",
+        )
+        scores = compute_completeness(desc)
+        # 1 valid object out of 3 needed for full score
+        assert 0.5 < scores["objects"] < 1.0
+
+    def test_nonstandard_weather_scores_half(self):
+        from src.evaluation.completeness import compute_completeness
+
+        desc = SceneDescription(
+            summary="A driving scene with unusual conditions.",
+            weather="hazy",  # Non-standard but present
+            lighting="daytime",
+            road_type="highway",
+        )
+        scores = compute_completeness(desc)
+        assert scores["weather"] == 0.5
+
+    def test_single_hazard_scores_partial(self):
+        from src.evaluation.completeness import compute_completeness
+
+        desc = SceneDescription(
+            summary="A driving scene with one hazard identified.",
+            weather="clear",
+            lighting="daytime",
+            road_type="highway",
+            hazards=["wet road"],
+        )
+        scores = compute_completeness(desc)
+        assert scores["hazards"] == 0.7
+
+
+# ── Agent No-Patterns Test ───────────────────────────────────────────────────
+
+
+class TestAgentNoPatterns:
+    """Test agent behavior when no error patterns exist."""
+
+    def test_generate_improved_prompt_returns_original(self):
+        from src.agent.analyzer import AnalysisReport, ErrorAnalyzerAgent
+
+        agent = ErrorAnalyzerAgent()
+        report = AnalysisReport(
+            prompt_id="v1_baseline",
+            n_images=10,
+            error_patterns=[],
+        )
+        original = "Describe this driving scene."
+        improved = agent.generate_improved_prompt(original, report)
+        assert improved == original  # No changes when no patterns
+
+
+# ── Count Accuracy Hallucinated Category Test ────────────────────────────────
+
+
+class TestCountAccuracyHallucinatedCategory:
+    """Test that hallucinated BDD100K categories are penalized in count accuracy."""
+
+    def test_hallucinated_bdd100k_category_penalized(self):
+        from src.evaluation.count_accuracy import compute_count_accuracy
+
+        predicted = [
+            DetectedObject(category="car", count=3),
+            DetectedObject(category="bus", count=2),  # Not in GT
+        ]
+        gt = {"car": 3}
+
+        result = compute_count_accuracy(predicted, gt)
+        # bus is a BDD100K category predicted but not in GT → penalized
+        assert result.mae > 0
+        assert "bus" in result.per_category
+        assert result.per_category["bus"]["accuracy"] == 0.0

@@ -374,7 +374,7 @@ function renderTable() {
             <td class="${bertClass}">${(bert * 100).toFixed(1)}%</td>
             <td class="${hallClass}">${(hall * 100).toFixed(1)}%</td>
             <td class="${compClass}">${(comp * 100).toFixed(1)}%</td>
-            <td>${(row.avg_count_accuracy_mae || 0).toFixed(2)}</td>
+            <td>${(row.avg_count_mae || 0).toFixed(2)}</td>
             <td>${((row.weather_accuracy || 0) * 100).toFixed(0)}%</td>
             <td>${((row.lighting_accuracy || 0) * 100).toFixed(0)}%</td>
             <td>${row.avg_judge_score != null ? row.avg_judge_score.toFixed(1) : '—'}</td>
